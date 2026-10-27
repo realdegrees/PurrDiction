@@ -43,6 +43,11 @@ namespace PurrNet.Prediction
 
         public ulong anchorTick => _anchorTick;
 
+        /// <summary>
+        /// The newest sample at or before the presented tick, unblended. Transient: not to be disposed.
+        /// </summary>
+        public T anchor => _anchor;
+
         private ref Entry At(int index)
         {
             int slot = _head + index;

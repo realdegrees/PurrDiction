@@ -2978,6 +2978,7 @@ namespace PurrNet.Prediction
                             SaveEnteringState(frame.serverTick + 1);
                             _savedEnteringStateTick = frame.serverTick + 1;
                             _verifiedServerTick = frame.serverTick;
+                            NoteVerifiedFrameArrival(frame.serverTick);
                             CarryVerifiedInputs(frame.serverTick);
                         }
                         catch (Exception error)
@@ -3001,6 +3002,7 @@ namespace PurrNet.Prediction
                             continue;
                         }
                         _verifiedServerTick = frame.serverTick;
+                        NoteVerifiedFrameArrival(frame.serverTick);
                         CarryVerifiedInputs(frame.serverTick);
                     }
 

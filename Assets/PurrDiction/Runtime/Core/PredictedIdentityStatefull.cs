@@ -42,7 +42,11 @@ namespace PurrNet.Prediction
 
         private ulong _viewSpawnTick;
 
-        private ulong viewTeleportTick => predictionManager ? predictionManager.localTickInContext : 0;
+        private ulong viewTeleportTick => predictionManager
+            ? PresentsOnRelayClock(predictionManager) && lastVerifiedTick is { } verified
+                ? verified
+                : predictionManager.localTickInContext
+            : 0;
 
         // Codegen enables this for ordinary value states; mutable containers stay uncached.
         protected virtual bool SupportsStateDeltaCaching() => false;
@@ -383,12 +387,19 @@ namespace PurrNet.Prediction
 
         public override void UpdateRollbackInterpolationState(float delta, bool accumulateError)
         {
-            var copy = fullPredictedState.DeepCopy();
-            ModifyRollbackViewState(ref copy.state, delta, accumulateError);
-
-            // One liveness check serves both reads of the manager.
+            // One liveness check serves every read of the manager.
             var manager = predictionManager;
             bool managerAlive = manager;
+
+            // A relayed identity holds the state of the newest verified frame, so its samples are keyed by
+            // that frame's tick and carry no misprediction to smooth.
+            bool relay = managerAlive && PresentsOnRelayClock(manager);
+            if (relay && !lastVerifiedTick.HasValue)
+                return;
+
+            var copy = fullPredictedState.DeepCopy();
+            ModifyRollbackViewState(ref copy.state, delta, accumulateError && !relay);
+
             bool refreshOnly = managerAlive && manager.refreshViewLatchOnly;
             if (!PredictionManager.ShouldReplaceViewLatch(refreshOnly, _hasViewState || _viewAwaitsReplaySample))
             {
@@ -400,9 +411,16 @@ namespace PurrNet.Prediction
                 _viewState.Dispose();
             _viewState = copy;
             _hasViewState = true;
-            _viewStateTick = managerAlive ? manager.localTick : 0;
+            _viewStateTick = relay ? lastVerifiedTick.Value : managerAlive ? manager.localTick : 0;
             _viewAwaitsReplaySample = false;
         }
+
+        /// <summary>
+        /// True on a client for an identity on the server-relay timeline: its view is keyed by verified
+        /// server ticks and presented at <see cref="PredictionManager.relayViewTick"/>.
+        /// </summary>
+        internal bool PresentsOnRelayClock(PredictionManager manager)
+            => !manager.cachedIsServer && UsesServerRelayTimeline();
 
         protected virtual void ModifyRollbackViewState(ref STATE state, float delta, bool accumulateError) { }
 
@@ -859,6 +877,23 @@ namespace PurrNet.Prediction
         public int viewInterpolationBufferSize => _interpolatedState?.Count ?? -1;
 
         /// <summary>
+        /// The state of the newest view sample at or before the presented tick (<see cref="viewAnchorTick"/>),
+        /// unblended, for presentation that must not be interpolated field by field. False before the view
+        /// buffer exists. The value is transient and must not be disposed.
+        /// </summary>
+        public bool TryGetViewAnchorState(out STATE state)
+        {
+            if (_interpolatedState == null)
+            {
+                state = default;
+                return false;
+            }
+
+            state = _interpolatedState.anchor.state;
+            return true;
+        }
+
+        /// <summary>
         /// Prediction tick of the newest view sample at or before the presented tick, or 0 before
         /// the view buffer exists.
         /// </summary>
@@ -936,7 +971,9 @@ namespace PurrNet.Prediction
                 _hasViewState = false;
             }
 
-            viewState = _interpolatedState.Sample(predictionManager.viewTick).state;
+            var manager = predictionManager;
+            viewState = _interpolatedState.Sample(
+                PresentsOnRelayClock(manager) ? manager.relayViewTick : manager.viewTick).state;
 
             int hooks = viewHooks;
             if (_firstViewUpdate)

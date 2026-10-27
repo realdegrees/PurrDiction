@@ -43,6 +43,7 @@ namespace PurrNet.Prediction
         private readonly List<PlayerID> _viewOffsetPlayerScratch = new();
         private History<ColliderTickSample> _colliderTickMap;
         private PredictionViewClock _viewClock;
+        private PredictionRelayViewClock _relayViewClock;
         private PredictedLagCompensation _lagCompensation;
 
         /// <summary>
@@ -62,6 +63,20 @@ namespace PurrNet.Prediction
         /// buffered depth. A server without a local view reports <see cref="localTick"/>.
         /// </summary>
         public double viewTick => _viewClock?.viewTick ?? localTick;
+
+        /// <summary>
+        /// The precise server tick at which this client presents server-relayed identities, including the
+        /// fraction between two ticks. It runs on a steady clock a short, adaptive delay behind the server's
+        /// estimated current tick, so frames that arrive bunched still play evenly. Equals
+        /// <see cref="viewTick"/> on the server and before the first verified frame.
+        /// </summary>
+        public double relayViewTick => cachedIsServer || _relayViewClock == null ? viewTick : _relayViewClock.viewTick;
+
+        /// <summary>
+        /// How many ticks <see cref="relayViewTick"/> stays behind the estimated current server tick. Zero on
+        /// the server. Diagnostic.
+        /// </summary>
+        public double relayViewDelayTicks => cachedIsServer || _relayViewClock == null ? 0d : _relayViewClock.delayTicks;
 
         /// <summary>
         /// Newest server tick whose authoritative frame this client has applied. Equals
@@ -269,8 +284,16 @@ namespace PurrNet.Prediction
             EnsureViewClock().Latch(localTick, refreshViewLatchOnly);
         }
 
+        private void NoteVerifiedFrameArrival(ulong serverTick)
+        {
+            if (_relayViewClock == null || _relayViewClock.tickRate != Math.Max(1, tickRate))
+                _relayViewClock = new PredictionRelayViewClock(tickRate);
+            _relayViewClock.NoteArrival(serverTick, UnityEngine.Time.realtimeSinceStartupAsDouble);
+        }
+
         private void AdvanceViewClock(float deltaTime)
         {
+            _relayViewClock?.Advance(UnityEngine.Time.realtimeSinceStartupAsDouble);
             var clock = EnsureViewClock();
             clock.Advance(deltaTime);
             if (clock.lastAdvanceTrimmed)
@@ -284,6 +307,7 @@ namespace PurrNet.Prediction
             _viewOffsets.Clear();
             _colliderTickMap?.Clear();
             _viewClock = null;
+            _relayViewClock = null;
         }
     }
 }

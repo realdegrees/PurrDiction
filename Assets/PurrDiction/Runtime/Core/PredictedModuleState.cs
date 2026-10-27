@@ -26,7 +26,15 @@ namespace PurrNet.Prediction
         private PredictedViewBuffer<MODULE_STATE<TState>> _interpolatedState;
         private ulong _viewStateTick;
 
-        private ulong viewTeleportTick => predictionManager ? predictionManager.localTickInContext : 0;
+        private ulong viewTeleportTick => predictionManager
+            ? PresentsOnRelayClock && identity.lastVerifiedTick is { } verified
+                ? verified
+                : predictionManager.localTickInContext
+            : 0;
+
+        // A module presents on its identity's timeline; see PredictedIdentity<STATE>.PresentsOnRelayClock.
+        private bool PresentsOnRelayClock
+            => predictionManager && !predictionManager.cachedIsServer && identity.UsesServerRelayTimeline();
         private MODULE_STATE<TState>? _viewState;
 
         public TState viewState;
@@ -172,7 +180,8 @@ namespace PurrNet.Prediction
                 _viewState = null;
             }
 
-            viewState = _interpolatedState.Sample(predictionManager.viewTick).state;
+            viewState = _interpolatedState.Sample(
+                PresentsOnRelayClock ? predictionManager.relayViewTick : predictionManager.viewTick).state;
 
             UpdateView(viewState, verifiedState);
         }
@@ -207,8 +216,12 @@ namespace PurrNet.Prediction
 
         protected override void UpdateInterpolation(float delta, bool accumulateError)
         {
+            bool relay = PresentsOnRelayClock;
+            if (relay && !identity.lastVerifiedTick.HasValue)
+                return;
+
             var copy = fullPredictedState.DeepCopy();
-            ModifyRollbackViewState(ref copy.state, delta, accumulateError);
+            ModifyRollbackViewState(ref copy.state, delta, accumulateError && !relay);
 
             bool refreshOnly = predictionManager && predictionManager.refreshViewLatchOnly;
             if (!PredictionManager.ShouldReplaceViewLatch(refreshOnly, _viewState.HasValue))
@@ -219,7 +232,7 @@ namespace PurrNet.Prediction
 
             _viewState?.Dispose();
             _viewState = copy;
-            _viewStateTick = predictionManager ? predictionManager.localTick : 0;
+            _viewStateTick = relay ? identity.lastVerifiedTick.Value : predictionManager ? predictionManager.localTick : 0;
         }
 
         protected virtual void ModifyRollbackViewState(ref TState state, float delta, bool accumulateError) { }

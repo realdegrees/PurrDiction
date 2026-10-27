@@ -114,7 +114,15 @@ namespace PurrNet.Prediction
         private PredictedViewBuffer<FULL_STATE<STATE>> _interpolatedState;
         private ulong _viewStateTick;
 
-        private ulong viewTeleportTick => predictionManager ? predictionManager.localTickInContext : 0;
+        private ulong viewTeleportTick => predictionManager
+            ? PresentsOnRelayClock && lastVerifiedTick is { } verified
+                ? verified
+                : predictionManager.localTickInContext
+            : 0;
+
+        // See PredictedIdentity<STATE>.PresentsOnRelayClock.
+        private bool PresentsOnRelayClock
+            => predictionManager && !predictionManager.cachedIsServer && UsesServerRelayTimeline();
         private History<FULL_STATE<STATE>> _stateHistory;
 
         protected TickManager tickModule { get; private set; }
@@ -290,8 +298,12 @@ namespace PurrNet.Prediction
 
         public override void UpdateRollbackInterpolationState(float delta, bool accumulateError)
         {
+            bool relay = PresentsOnRelayClock;
+            if (relay && !lastVerifiedTick.HasValue)
+                return;
+
             var copy = fullPredictedState.DeepCopy();
-            ModifyRollbackViewState(ref copy.state, delta, accumulateError);
+            ModifyRollbackViewState(ref copy.state, delta, accumulateError && !relay);
 
             bool refreshOnly = predictionManager && predictionManager.refreshViewLatchOnly;
             if (!PredictionManager.ShouldReplaceViewLatch(refreshOnly, _viewState.HasValue))
@@ -302,7 +314,7 @@ namespace PurrNet.Prediction
 
             _viewState?.Dispose();
             _viewState = copy;
-            _viewStateTick = predictionManager ? predictionManager.localTick : 0;
+            _viewStateTick = relay ? lastVerifiedTick.Value : predictionManager ? predictionManager.localTick : 0;
         }
 
         protected virtual void ModifyRollbackViewState(ref STATE state, float delta, bool accumulateError) { }
@@ -400,7 +412,8 @@ namespace PurrNet.Prediction
                 _viewState = null;
             }
 
-            viewState = _interpolatedState.Sample(predictionManager.viewTick).state;
+            viewState = _interpolatedState.Sample(
+                PresentsOnRelayClock ? predictionManager.relayViewTick : predictionManager.viewTick).state;
 
             if (_firstViewUpdate)
             {
