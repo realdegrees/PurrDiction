@@ -298,6 +298,14 @@ namespace PurrNet.Prediction
 
         protected virtual void SimulationStart() {}
 
+        internal override void BatchedSimulationStart()
+        {
+            if (fullPredictedState.prediction.wasOnSimulationStartCalled)
+                return;
+            SimulationStart();
+            fullPredictedState.prediction.wasOnSimulationStartCalled = true;
+        }
+
         internal override void SimulateTick(ulong tick, float delta)
         {
             using (simulateMarker.Auto())

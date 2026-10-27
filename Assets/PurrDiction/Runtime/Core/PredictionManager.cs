@@ -3312,25 +3312,58 @@ namespace PurrNet.Prediction
             _passRosterBuilt = true;
         }
 
+        private readonly List<IPredictionBatch> _batchesRun = new();
+        private readonly List<PredictedIdentity> _batchMembers = new();
+
         private void SimulateSystems(ulong tick, float delta)
         {
+            _batchesRun.Clear();
             if (!PassRosterHolds())
             {
                 for (var j = 0; j < _systemsCount; j++)
-                    _systems[j].RunSimulateTick(tick, delta);
+                    SimulateSystem(j, tick, delta);
                 return;
             }
 
             for (var k = 0; k < _passRosterCount; k++)
             {
                 int index = _passRoster[k];
-                _systems[index].RunSimulateTick(tick, delta);
+                SimulateSystem(index, tick, delta);
                 if (PassRosterHolds())
                     continue;
                 for (var j = index + 1; j < _systemsCount; j++)
-                    _systems[j].RunSimulateTick(tick, delta);
+                    SimulateSystem(j, tick, delta);
                 return;
             }
+        }
+
+        // A batched identity is simulated by its batch, once per pass, at the position of the first member that
+        // simulates in this pass; the members after it are skipped. See IPredictionBatch.
+        private void SimulateSystem(int index, ulong tick, float delta)
+        {
+            var system = _systems[index];
+            var batch = system.simulationBatch;
+            if (batch == null)
+            {
+                system.RunSimulateTick(tick, delta);
+                return;
+            }
+
+            if (_batchesRun.Contains(batch) || system.SkipsCurrentSimulationPhase())
+                return;
+            _batchesRun.Add(batch);
+
+            _batchMembers.Clear();
+            for (var j = index; j < _systemsCount; j++)
+            {
+                var member = _systems[j];
+                if (member.simulationBatch == batch && !member.SkipsCurrentSimulationPhase())
+                    _batchMembers.Add(member);
+            }
+
+            for (var j = 0; j < _batchMembers.Count; j++)
+                _batchMembers[j].RunBatchedPreSimulate(tick, delta);
+            batch.SimulateBatch(tick, delta, _batchMembers);
         }
 
         private void GetLatestUnityStates()
