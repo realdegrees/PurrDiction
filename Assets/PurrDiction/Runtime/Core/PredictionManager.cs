@@ -2850,6 +2850,16 @@ namespace PurrNet.Prediction
                 (int)(tickRate * ViewInterpolationMaxBufferSeconds));
         }
 
+        /// <summary>
+        /// Samples an identity's view buffer keeps: enough for the view clock's buffer and for the relay
+        /// clock's deepest delay, plus the anchor and the sample after the presented tick.
+        /// </summary>
+        internal static int GetViewBufferCapacity(int tickRate)
+        {
+            return Math.Max(GetViewInterpolationMaxBufferSize(tickRate),
+                PredictionRelayViewClock.MaxDelayTicks(tickRate)) + 2;
+        }
+
         internal bool refreshViewLatchOnly { get; private set; }
 
         /// <summary>

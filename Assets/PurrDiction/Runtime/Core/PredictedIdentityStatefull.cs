@@ -179,7 +179,7 @@ namespace PurrNet.Prediction
         }
 
         private static int ViewBufferCapacity(PredictionManager world)
-            => PredictionManager.GetViewInterpolationMaxBufferSize(world.tickRate) + 2;
+            => PredictionManager.GetViewBufferCapacity(world.tickRate);
 
         private bool HasViewBufferFor(PredictionManager world)
             => _interpolatedState != null && _interpolatedState.capacity == ViewBufferCapacity(world);

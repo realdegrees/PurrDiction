@@ -18,6 +18,10 @@ namespace PurrNet.Prediction
         private const double DepthDecayTicksPerSecond = 1.0;
         private const double DepthMarginTicks = 0.25;
 
+        // The deepest the clock ever stays behind. A server stall longer than this is a hold, not jitter: the
+        // view runs out of samples and waits, instead of carrying the stall's depth for minutes afterwards.
+        private const double MaxDelaySeconds = 0.2;
+
         // The clock closes on its target by running at most this much faster or slower than real time,
         // and jumps only when it is further off than any steady delay would put it.
         private const double MaxRateAdjust = 0.1;
@@ -36,6 +40,12 @@ namespace PurrNet.Prediction
         }
 
         public int tickRate => _tickRate;
+
+        /// <summary>
+        /// The most ticks the presented tick can trail the estimated server tick, which every relayed view
+        /// buffer has to hold.
+        /// </summary>
+        internal static int MaxDelayTicks(int tickRate) => (int)Math.Ceiling(MaxDelaySeconds * Math.Max(1, tickRate));
 
         /// <summary>
         /// Server tick currently being presented, including the fraction between two ticks.
@@ -80,7 +90,8 @@ namespace PurrNet.Prediction
             _envelope -= EnvelopeDecayTicksPerSecond * dt;
             double serverNow = now * _tickRate + _envelope;
             double trail = Math.Max(0d, serverNow - _newest);
-            _depth = Math.Max(trail, _depth - DepthDecayTicksPerSecond * dt);
+            _depth = Math.Min(Math.Max(trail, _depth - DepthDecayTicksPerSecond * dt),
+                MaxDelaySeconds * _tickRate - DepthMarginTicks);
 
             double target = serverNow - delayTicks;
             double step = dt * _tickRate;

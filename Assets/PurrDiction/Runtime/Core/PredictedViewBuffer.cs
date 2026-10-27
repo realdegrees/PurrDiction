@@ -85,8 +85,8 @@ namespace PurrNet.Prediction
         /// Stores the state for <paramref name="tick"/>. A sample for the same tick as the anchor
         /// replaces it. A sample older than the anchor means the timeline moved backwards (a
         /// resync re-anchored the view ahead of the head), so the view restarts from that sample
-        /// rather than freezing until the clock catches up. The oldest pending sample is dropped
-        /// once the buffer exceeds its capacity.
+        /// rather than freezing until the clock catches up. Once the buffer exceeds its capacity the
+        /// oldest pending sample becomes the anchor.
         /// </summary>
         public void Add(ulong tick, T value)
         {
@@ -122,9 +122,14 @@ namespace PurrNet.Prediction
             At(index) = new Entry { tick = tick, value = value };
             _count++;
 
+            // An overflowing buffer moves the view forward: the dropped sample becomes the anchor, so the view
+            // never blends from a state older than everything it still holds.
             while (_count > _capacity)
             {
-                At(0).value.Dispose();
+                ref var dropped = ref At(0);
+                _anchor.Dispose();
+                _anchor = dropped.value;
+                _anchorTick = dropped.tick;
                 DropOldest();
             }
         }

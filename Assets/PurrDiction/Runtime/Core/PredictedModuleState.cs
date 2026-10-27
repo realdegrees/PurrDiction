@@ -83,7 +83,6 @@ namespace PurrNet.Prediction
         internal override void OnCoreInitialize()
         {
             var tickRate = predictionManager.tickRate;
-            var bufferSize = PredictionManager.GetViewInterpolationMaxBufferSize(tickRate);
 
             _history = new History<MODULE_STATE<TState>>(tickRate * 10);
 
@@ -91,7 +90,7 @@ namespace PurrNet.Prediction
                 FULLInterpolate,
                 predictionManager.localTickInContext,
                 fullPredictedState.DeepCopy(),
-                bufferSize + 2
+                PredictionManager.GetViewBufferCapacity(tickRate)
             );
         }
 
