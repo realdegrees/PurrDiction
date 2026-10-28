@@ -2907,6 +2907,15 @@ namespace PurrNet.Prediction
                    now - lastBatchTime < intervalSeconds;
         }
 
+        private static bool IsDeltaOn(in FrameDelta next, ulong serverTick)
+            => !next.fullFrame && next.baselineTick == serverTick && next.serverTick > serverTick;
+
+        /// <summary>
+        /// Verified frames decoded without being simulated, because the frame queued after each was a delta on it.
+        /// Diagnostic only.
+        /// </summary>
+        public ulong supersededFramesTotal { get; private set; }
+
         private void ProcessQueuedFrames(bool renderPhase)
         {
             double interval = PredictionPerformanceTelemetry.reconcileIntervalSeconds;
@@ -2964,6 +2973,15 @@ namespace PurrNet.Prediction
 
                     isVerified = true;
 
+                    // Every frame is decoded, since the next one is a delta on it. But when the next one is already
+                    // queued, simulating this one a tick forward and saving that is wasted: the next frame carries the
+                    // server's own state for its tick and overwrites both before anything reads them. Frames arrive
+                    // together whenever the server or the network bunches them, which is exactly when the client can
+                    // least afford a rollback and simulation per frame.
+                    bool superseded = _deltas.Count > 0 && IsDeltaOn(_deltas.Peek(), frame.serverTick);
+                    if (superseded)
+                        supersededFramesTotal++;
+
                     _frameApplyHadRecordFailure = false;
                     _frameApplyHadBaselineFailure = false;
                     _applyingFrameServerTick = frame.serverTick;
@@ -2984,9 +3002,12 @@ namespace PurrNet.Prediction
                                 MarkHistoryResyncNeeded(frame.serverTick);
                                 continue;
                             }
-                            SimulateFrame(frame.serverTick, HistorySaveMode.VerifiedFrame);
-                            SaveEnteringState(frame.serverTick + 1);
-                            _savedEnteringStateTick = frame.serverTick + 1;
+                            if (!superseded)
+                            {
+                                SimulateFrame(frame.serverTick, HistorySaveMode.VerifiedFrame);
+                                SaveEnteringState(frame.serverTick + 1);
+                                _savedEnteringStateTick = frame.serverTick + 1;
+                            }
                             _verifiedServerTick = frame.serverTick;
                             NoteVerifiedFrameArrival(frame.serverTick);
                             CarryVerifiedInputs(frame.serverTick);
@@ -3002,9 +3023,12 @@ namespace PurrNet.Prediction
                         try
                         {
                             RollbackToFrame(frame.packer, frame.serverTick, frame.baselineTick, frame.serverTick);
-                            SimulateFrame(frame.serverTick, HistorySaveMode.VerifiedFrame);
-                            SaveEnteringState(frame.serverTick + 1);
-                            _savedEnteringStateTick = frame.serverTick + 1;
+                            if (!superseded)
+                            {
+                                SimulateFrame(frame.serverTick, HistorySaveMode.VerifiedFrame);
+                                SaveEnteringState(frame.serverTick + 1);
+                                _savedEnteringStateTick = frame.serverTick + 1;
+                            }
                         }
                         catch (Exception error)
                         {
